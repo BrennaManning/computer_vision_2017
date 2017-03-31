@@ -21,16 +21,16 @@ import os
 import glob
 from shutil import copyfile
 import cv 
+import random
 
 def sortfiles():
-    """ This function for sorting through the ck database was taken from 
-    the first Paul Vangent tutorial. """
+    """ This function for sorting through the ck database to be easier to use was taken from 
+    the first Paul Vangent tutorial. This function is called once after the dataset is first downloaded."""
+
     emotions = ["neutral", "anger", "contempt", "disgust", "fear", "happy", "sadness", "surprise"] #Define emotion order
     participants = [d for d in os.listdir('source_emotion') if os.path.isdir(os.path.join('source_emotion', d))]
 
     #participants = glob.glob("source_emotion\\*") #Returns a list of all folders with participant numbers
-    
-    #
     for x in participants:
         part = "%s" %x[-4:] #store current participant number
         
@@ -120,10 +120,12 @@ class Face(object):
         self.emotion = None
         self.vectors = []
 
-def get_landmark_vectors(face, image, predictor, detector):
+def get_landmark_vectors(face, image):
     # Landmark Vector Info  
     vector_lengths = [] # Euclidean distance from each keypoint to the center
     vector_angles = [] # Corrected for offset using nose bridge angle
+    predictor = dlib.shape_predictor("shape_predictor_68_face_landmarks.dat") # Landmark identifier
+    detector = dlib.get_frontal_face_detector()
     detections = detector(image, 1)
     face.detections = detections # get faces
     # If there is one face
@@ -167,7 +169,8 @@ def get_landmark_vectors(face, image, predictor, detector):
         
         face.vector_lengths.append(vector_lengths)
         face.vector_angles.append(vector_angles)
-        face.vectors.append((vector_lengths, vector_angles))
+        face.vectors.append(vector_lengths)
+        face.vectors.append(vector_angles)
 
     elif len(detections) < 1: 
         print "no faces detected"
@@ -198,46 +201,111 @@ def save(image_data, filepath):
     else:
         pass
 
-def run():
-    detector = dlib.get_frontal_face_detector() # Face detector
-    predictor = dlib.shape_predictor("shape_predictor_68_face_landmarks.dat") # Landmark identifier
 
-    while True:
-        #video_capture = cv2.VideoCapture(0) # webcam object
-        #ret, self.frame = self.video_capture.read()
-        img_list = ["test.png"]
-        for img_path in img_list:
-            print "IMAGE"
+def get_train_test_split(file_list):
+    random.shuffle(file_list)
+    training = file_list[:int(len(file_list)*0.8)]
+    testing = file_list[-int(len(file_list)*0.2)]
+    return training, testing
+
+def make_datasets(emotions, foldername="ck-sorted/"):
+    print "making datasets"
+    training_data = []
+    training_labels = []
+    testing_data = []
+    testing_labels = []
+    error_count = 0
+
+    for emotion in emotions:
+        path = foldername+emotion
+        image_files = os.listdir(path)
+        training, testing = get_train_test_split(image_files)
+
+        for img in training:
+            print emotion, "training ", img 
+            img_path = foldername+emotion+"/"+img
 
             face = Face()
             frame = cv2.imread(img_path)
+            # Make gray if not already gray
             try:
                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                 frame = gray.copy()
-                
             except:
                 pass
+            # Histogram equalization
             clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
             clahe_image = clahe.apply(frame)
-            detections = detector(frame, 1)
-            face = get_landmark_vectors(face=face, image=clahe_image, predictor=predictor, detector=detector)
-            
-            frame = draw(frame, face)
-            
-            cv2.imshow("image", frame)
-            cv2.waitKey(0)
-            print(face.vectors)
+            # Get vector data
+            try:
+                face = get_landmark_vectors(face=face, image=clahe_image)
+                training_data.append(face.vectors)
+                training_labels.append(emotions.index(emotion))
+            except RuntimeError as e:
+                print "Error getting landmark vectors for image: ", img_path
+                print e
+                error_count = error_count +1
 
-            if cv2.waitKey(10) & 0xFF == ord('q'):
-                print "================================="
-                print "Quitting.. Saving data to .CSV"
-                print "================================="
-                with open('../all_landmarks_vectorized.csv', 'wb') as myfile:
-                    wr = csv.writer(myfile, quoting=csv.QUOTE_ALL)
-                    for row in face.vectors:
-                        wr.writerow(row)
-                break
+            
 
-#node = EmotionRecognizerNode()
-#node.run()
+        for img in testing:
+            print emotion, "testing"
+            img_path = foldername+emotion+"/"+img
+
+            face = Face()
+            frame = cv2.imread(img_path)
+            # Make gray if not already gray
+            try:
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                frame = gray.copy()
+            except:
+                pass
+            # Histogram equalization
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+            clahe_image = clahe.apply(frame)
+            # Get vector data
+
+            try:
+                face = get_landmark_vectors(face=face, image=clahe_image)
+                testing_data.append(face.vectors)
+                testing_labels.append(emotions.index(emotion))
+            except RuntimeError as e:
+                print "Error getting landmark vectors for image: ", img_path
+                print e
+                error_count = error_count +1
+
+    print "RUNTIME ERROR COUNT: ", error_count
+    return training_data, training_labels, testing_data, testing_labels
+
+def learning_SVM(iterations, emotions):
+    """ Based on http://www.paulvangent.com/2016/08/05/emotion-recognition-using-facial-landmarks/ """ 
+    accur_lin = []
+    clf = sklearn.svm.SVC(kernel='linear', probability=True, tol=1e-3) #Set the classifier as a support vector machines with polynomial kernel
+    for i in range(iterations):
+        training_data, training_labels, testing_data, testing_labels = make_datasets(emotions)
+        np_training = np.array(training_data) # convert to numpy array for classifier
+        np_training_labels = np.array(training_labels)
+        print "training SVM linear: ", i #train SVM
+        clf.fit(np_training, np_training_labels)
+
+        print("getting accuracies: ", i) #Use score() function to get accuracy
+        np_test = np.array(testing_data)
+        accuracy = clf.score(np_test, testing_labels)
+        print "linear accuracy: ", accuracy
+        accur_lin.append(accuracy) #Store accuracy in a list
+
+    score = np.mean(accur_lin)
+    print "SVM SCORE = ", score
+
+def run():
+    
+    #while True:
+    #video_capture = cv2.VideoCapture(0) # webcam object
+    #ret, self.frame = self.video_capture.read()
+    emotions = ["neutral", "anger", "contempt", "disgust", "fear", "happy", "sadness", "surprise"]
+    emotions_subset = ["happy", "sadness"]
+    training_data, training_labels, testing_data, testing_labels = make_datasets(emotions_subset)
+    print testing_data
+    
+
 run()
