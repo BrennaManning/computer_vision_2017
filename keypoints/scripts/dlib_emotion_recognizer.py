@@ -31,6 +31,7 @@ import cv
 import random
 from sklearn.svm import SVC
 from sklearn.neighbors import KNeighborsClassifier
+import time
 
 
 class Face(object):
@@ -206,12 +207,13 @@ def get_landmark_vectors(image):
 
 def draw(frame, face):
     """ Draws keypoints and center of mass on ace image."""
-    landmarks = face.predicted_landmarks
-    # features
-    for i in range(1, 68):
-        cv2.circle(frame, (landmarks.part(i).x, landmarks.part(i).y), 1, (0,0,255), thickness=2)
-    # center of mass
-    cv2.circle(frame, (int(face.xcenter), int(face.ycenter)), 1, (255, 0, 0), thickness = 3)
+    if face.predicted_landmarks:
+        landmarks = face.predicted_landmarks
+        # features
+        for i in range(1, 68):
+            cv2.circle(frame, (landmarks.part(i).x, landmarks.part(i).y), 1, (0,0,255), thickness=2)
+        # center of mass
+        cv2.circle(frame, (int(face.xcenter), int(face.ycenter)), 1, (255, 0, 0), thickness = 3)
     
     return frame
 
@@ -310,9 +312,9 @@ def learning_SVM(iterations, emotions):
     print "SVM SCORE = ", score
     return clf
 
-def make_SVM_prediction(clf, image, emotions):
+def make_SVM_prediction(clf, face, emotions):
     """ """ 
-    face = get_landmark_vectors(image=image)
+    
     if len(face.vectors) > 0:
         vectors = np.array(face.vectors).reshape(1, -1)
         prediction_num = np.asscalar(clf.predict(vectors))
@@ -327,7 +329,7 @@ def make_SVM_prediction(clf, image, emotions):
 
         print "GUESS"
 
-        print "string", face.emotion
+        print face.emotion
 
 
 def learning_logistic_regression(iteraitons, emotions):
@@ -344,7 +346,28 @@ def run():
     emotions = ["neutral", "anger", "contempt", "disgust", "fear", "happy", "sadness", "surprise"]
     emotions_subset = ["happy", "sadness"]
    
-    clf = learning_SVM(1, emotions_subset)
+    video_capture = cv2.VideoCapture(0)
+    last_time = 0
+    while True:
+        curr_time = time.time()
+        ret, frame = video_capture.read()
+
+        if curr_time - last_time > 3:
+            print "curr_time - last_time = ", curr_time-last_time
+            
+            cv2.imshow("webcam", frame)
+            face = get_landmark_vectors(frame)
+            frame = draw(frame, face)
+            cv2.imshow("webcam", frame)
+            last_time = time.time()
+            if cv2.waitKey(10) & 0xFF == ord('q'):
+                print "================================="
+                print "Quitting.."
+                print "================================="
+                cv2.waitKey(1)
+                break
+
+    clf = learning_SVM(1, emotions)
     print "==========================================="
     print ""
     print "CLF COMPLETE"
@@ -353,23 +376,31 @@ def run():
     sad = cv2.imread("sadtest.png")
     print "--------------------"
     print "HAPPY PREDICTION:  "
-    make_SVM_prediction(clf, happy, emotions_subset)
+    happyface = get_landmark_vectors(happy)
+    make_SVM_prediction(clf, happyface, emotions)
     print "-------------------"
     print "SAD PREDICTION:    "
-    make_SVM_prediction(clf, sad, emotions_subset)
+    sadface = get_landmark_vectors(sad)
+    make_SVM_prediction(clf, sadface, emotions)
 
     print "==========================================="
 
     print "WEBCAM TEST"
 
+    last_time = 0
     while True:
-        video_capture = cv2.VideoCapture(0)
         ret, frame = video_capture.read()
-        make_SVM_prediction(clf, frame, emotions_subset)
-        cv2.imshow("webcam", frame)
-        if cv2.waitKey(10) & 0xFF == ord('q'):
-                print "================================="
-                print "Quitting.."
-                print "================================="
-                break
+        curr_time = time.time()
+        if curr_time - last_time > 3.5:
+            cv2.imshow("webcam", frame)
+            face = get_landmark_vectors(frame)
+            make_SVM_prediction(clf, face, emotions)
+            frame = draw(frame, face)
+            cv2.imshow("landmarks", frame)
+            last_time = time.time()
+            if cv2.waitKey(10) & 0xFF == ord('q'):
+                    print "================================="
+                    print "Quitting.."
+                    print "================================="
+                    break
 run()
