@@ -1,7 +1,8 @@
 """
-dlib test
+dlib test.
+This was used for learning how to used dlib for face key-point detection.
+Not final result of project.
 
-Learning how to used dlib.
 Used tutorials: 
 http://www.paulvangent.com/2016/08/05/emotion-recognition-using-facial-landmarks/
 http://www.paulvangent.com/2016/04/01/emotion-recognition-with-python-opencv-and-a-face-dataset/
@@ -9,8 +10,6 @@ by __author__ = "Paul van Gent, 2016"
 
 and also referenced 
 opencv dlib documentation https://www.learnopencv.com/tag/dlib/
-
-
 """
 
 import cv2
@@ -22,41 +21,22 @@ import sklearn
 
 
 class EmotionRecognizerNode(object):
+    """ Class for emotion recognizer node. """
     def __init__(self):
         self.image = None
-        self.clahe_image = None
+        self.clahe_image = None # histogram equalized
         self.video_capture = cv2.VideoCapture(0) #Webcam object
         self.detector = dlib.get_frontal_face_detector() #Face detector
         self.predictor = dlib.shape_predictor("shape_predictor_68_face_landmarks.dat") #Landmark identifier. Set the filename to whatever you named the downloaded file
         self.detections = None
-        self.xmean = 0
-        self.ymean = 0
+        self.xmean = 0 # center of face x
+        self.ymean = 0 # center of face y
         self.all_landmarks_vectorized = []
-        
-    # def get_landmarks(self, image):
-    #     detections = self.detector(image, 1)
-    #     for k,d in enumerate(detections): #For all detected face instances individually
-    #         shape = self.predictor(image, d) #Draw Facial Landmarks with the predictor class
-    #         xlist = []
-    #         ylist = []
-    #         for i in range(1,68): #Store X and Y coordinates in two lists
-    #             xlist.append(float(shape.part(i).x))
-    #             ylist.append(float(shape.part(i).y))
-                
-    #         for x, y in zip(xlist, ylist): #Store all landmarks in one list in the format x1,y1,x2,y2,etc.
-    #             landmarks.append(x)
-    #             landmarks.append(y)
-    #     if len(detections) > 0:
-    #         return landmarks
-    #     else: #If no faces are detected, return error message to other function to handle
-    #         landmarks = "error"
-    #         return landmarks
-
 
     def get_landmarks_vectorized(self, image):
+        """ For an image node finds keypints and generates vectors. """
         print "landmarks_vectorized 1"
         landmarks_vectorized = []
-        print landmarks_vectorized
         detections = self.detector(image, 1)
         for k,d in enumerate(detections): # for each face detected (if more than one)
             predicted_landmarks = self.predictor(image, d) #Draw Facial Landmarks with the predictor class
@@ -82,17 +62,15 @@ class EmotionRecognizerNode(object):
                 anglenose -= 90
 
             for x, y, w, z in zip(xcentral, ycentral, xlist, ylist):
-                landmarks_vectorized.append(x) #Add the coordinates relative to the centre of gravity
+                landmarks_vectorized.append(x) # Add the coordinates relative to the centre of gravity
                 landmarks_vectorized.append(y)
-                print "landmarks_vectorized 2"
-                print landmarks_vectorized
                 #Get the euclidean distance between each point and the centre point (the vector length)
                 meannp = np.asarray((self.ymean,self.xmean))
                 coornp = np.asarray((z,w))
                 dist = np.linalg.norm(coornp-meannp)
                 landmarks_vectorized.append(dist)
 
-                #Get the angle the vector describes relative to the image, corrected for the offset that the nosebrigde has when the face is not perfectly horizontal
+                #Get the angle of the vector relative to the image, corrected for the offset of face rotation corresponding to angle of nosebrigde
                 anglerelative = (math.atan((z-self.ymean)/(w-self.xmean))*180/math.pi) - anglenose
                 landmarks_vectorized.append(anglerelative)
                 
@@ -114,9 +92,12 @@ class EmotionRecognizerNode(object):
     
 
     def run(self):
+        """ The main run loop. """
         while True:
             #ret, self.frame = self.video_capture.read()
+            # read image using OpenCV
             self.frame = cv2.imread("test.png")
+            # process image
             gray = cv2.cvtColor(self.frame, cv2.COLOR_BGR2GRAY)
             clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
             self.clahe_image = clahe.apply(gray)
