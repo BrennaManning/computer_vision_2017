@@ -1,0 +1,1 @@
+It should be noted that this project was done using the cohn-kanade (kanade ck+) database. We are not allowed to distribute images or any data from  this database. If you are interested, you can request access to the data here: http://www.consortium.ri.cmu.edu/ckagree/.
