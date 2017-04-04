@@ -33,7 +33,7 @@ class Face(object):
 
 class EmotionNode(object):
     """
-    Class for a emotion detection node
+    Class for an emotion detection Neato node.
     """
     def __init__(self):
         """
@@ -46,11 +46,13 @@ class EmotionNode(object):
         self.closest_corner = None
         self.emotion = None
 
+
     def stop(self):
         """
         Publish a /cmd_vel Twist corresponding to not moving
         """
         self.publisher.publish(Twist(linear=Vector3(0.0, 0.0, 0.0), angular=Vector3(0.0, 0.0, 0.0)))
+
 
     def read_emotion():
         """
@@ -60,8 +62,6 @@ class EmotionNode(object):
 
         pass
 
-
-    
 
     def run(self):
         print "connected to neato"
@@ -105,6 +105,8 @@ class EmotionNode(object):
 
 
 def process_image(image):
+    """ Process images before getting landmark vectors.
+    Convert to grayscale and equalize. """
     # Make grayscale if not already grayscale
     try:
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -118,16 +120,22 @@ def process_image(image):
     clahe_image = clahe.apply(image)
     return clahe_image
 
+
 def get_landmark_vectors(image):
+    """ Given an image, returns vectors from
+    all face keypoints to the center of face."""
+    # Create face
     face = Face()
+    # Process image
     image = process_image(image)
     # Landmark Vector Info  
     vector_lengths = [] # Euclidean distance from each keypoint to the center
     vector_angles = [] # Corrected for offset using nose bridge angle
-    predictor = dlib.shape_predictor("shape_predictor_68_face_landmarks.dat") # Landmark identifier
+    predictor = dlib.shape_predictor("../shape_predictor_68_face_landmarks.dat") # Landmark identifier
     detector = dlib.get_frontal_face_detector()
     detections = detector(image, 1)
-    face.detections = detections # get faces
+    face.detections = detections # Get faces
+    
     # If there is one face
     if len(detections) == 1:
         face.predicted_landmarks = predictor(image, face.detections[0]) # Get facial from dlib shape predictor
@@ -143,18 +151,20 @@ def get_landmark_vectors(image):
         # Determine and adjust for angular offset based on bridge of nose!
         # http://www.paulvangent.com/2016/08/05/emotion-recognition-using-facial-landmarks/
         # -----------------------------------------------------------------------------------
-        
         # The 26th and 29th points in the correspond to the bridge of the nose on a face.
         # 29 = tip of nose; 26 = top of nose bridge.
         nose_rotation = 0
+        
         if xlist[26] == xlist[29]: # Check to prevent dividing by 0  in calculation if they are the same.
             anglenose = 0 # No
+
         else:
             anglenose = int(math.atan((ylist[26]-ylist[29])/(xlist[26]-xlist[29]))) # Nose bridge angle in radians
             anglenose = (anglenose*360)/(2*math.pi)  # Convert nose bridge angle from radians to degrees.
 
         if anglenose < 0: #Get offset by finding how the nose bridge should be rotated to become perpendicular to the horizontal plane
             nose_rotation = anglenose + 90  
+
         else:
             nose_rotation = anglenose - 90
 
@@ -167,42 +177,48 @@ def get_landmark_vectors(image):
             anglerelative = (math.atan((z-np.mean(ylist))/(w-np.mean(xlist))*180/math.pi) - nose_rotation)
             vector_angles.append(anglerelative) # angle of keypoint -> center point angle adjusted for nose rotation.
         
+        # Add vectors to lists
         face.vector_lengths.append(vector_lengths)
         face.vector_angles.append(vector_angles)
+
         for i in range(len(vector_lengths)):
             face.vectors.append(vector_lengths[i])
             face.vectors.append(vector_angles[i])
 
+    # If there are no faces
     elif len(detections) < 1: 
         print "no faces detected"
+
+    # If there is more than one face
     else:
         print "too many faces!!!"
 
-    return face
+    return face # Empty if no faces or too many faces detected.
 
-def draw(frame, face):
-    """ Draws keypoints and center of mass on ace image."""
+
+def draw(image, face):
+    """ Draws keypoints and center of mass on an image given the image and a face object."""
     if face.predicted_landmarks:
         landmarks = face.predicted_landmarks
         # features
         for i in range(1, 68):
-            cv2.circle(frame, (landmarks.part(i).x, landmarks.part(i).y), 1, (0,0,255), thickness=2)
+            cv2.circle(image, (landmarks.part(i).x, landmarks.part(i).y), 1, (0,0,255), thickness=2)
         # center of mass
-        cv2.circle(frame, (int(face.xcenter), int(face.ycenter)), 1, (255, 0, 0), thickness = 3)
+        cv2.circle(image, (int(face.xcenter), int(face.ycenter)), 1, (255, 0, 0), thickness = 3)
     
-    return frame
+    return image
 
 
 def get_train_test_split(file_list):
+    """ Splits files into 80 percent training and 20 percent testing. """
     random.shuffle(file_list)
     training = file_list[:int(len(file_list)*0.8)]
     testing = file_list[int(len(file_list)*0.8):]
     return training, testing
+    
 
 def make_datasets(emotions, foldername="ck-sorted/"):
-    print "Current Directory"
-    print os.getcwd()
-    print "making datasets"
+    """ Creates training and testing data and labels from label list and directory path. """
     training_data = []
     training_labels = []
     testing_data = []
@@ -251,12 +267,23 @@ def make_datasets(emotions, foldername="ck-sorted/"):
     print "TRAINING NP "
     print np.asarray(training_data)
     print "----------------------"
+
+    print "SAVING DATA TO CSV"
+    save(training_data, 'training.csv')
+    save(training_labels, 'training_labels.csv')
+    save(testing_data, 'testing.csv')
+    save(testing_labels, 'testing_labels.csv')
+
     return training_data, training_labels, testing_data, testing_labels
 
 
-
 def learning_SVM(iterations, emotions):
-    """ Based on http://www.paulvangent.com/2016/08/05/emotion-recognition-using-facial-landmarks/ """ 
+    """ 
+    Fits to training data. Tets on testing data. 
+    Gets linear SVM accuracy score.
+    Returns clf to be used to make predictions.
+    Based on work in http://www.paulvangent.com/2016/08/05/emotion-recognition-using-facial-landmarks/
+    """ 
     accur_lin = []
     clf = SVC(kernel='linear', probability=True, tol=1e-3) #Set the classifier as a support vector machines with polynomial kernel
     for i in range(iterations):
@@ -277,9 +304,9 @@ def learning_SVM(iterations, emotions):
     print "SVM SCORE = ", score
     return clf
 
+
 def make_SVM_prediction(clf, face, emotions):
-    """ """ 
-    
+    """ Makes prediction given face and classifier. Returns predicted emotion. """    
     if len(face.vectors) > 0:
         vectors = np.array(face.vectors).reshape(1, -1)
         prediction_num = np.asscalar(clf.predict(vectors))
@@ -288,10 +315,9 @@ def make_SVM_prediction(clf, face, emotions):
         except Exception as e:
             face.emotion = "ERROR in face.emotion = emotions.index(prediction_num)"
             print e
-        
-
         print face.emotion
         return face.emotion
+
 
             
 if __name__ == "__main__":
